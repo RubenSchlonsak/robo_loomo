@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:background="#000000"
+    android:padding="24dp">
+
+    <TextView
+        android:id="@+id/status_text"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="LoomoAgent"
+        android:textColor="#22c55e"
+        android:textSize="20sp"
+        android:fontFamily="monospace"
+        android:textStyle="bold" />
+
+    <TextView
+        android:id="@+id/ip_text"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="10dp"
+        android:text="Starting..."
+        android:textColor="#e5e7eb"
+        android:textSize="18sp"
+        android:fontFamily="monospace" />
+
+    <TextView
+        android:id="@+id/details_text"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="16dp"
+        android:textColor="#9ca3af"
+        android:textSize="14sp"
+        android:fontFamily="monospace"
+        android:lineSpacingExtra="4dp"
+        android:text="Loading..." />
+
+    <SurfaceView
+        android:id="@+id/preview_surface"
+        android:layout_width="320dp"
+        android:layout_height="240dp"
+        android:layout_marginTop="18dp"
+        android:alpha="0.08" />
+
+</LinearLayout>

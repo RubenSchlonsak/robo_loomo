@@ -1,0 +1,15 @@
+.gradle/
+.gradle-user/
+app/build/
+build/
+local.properties
+*.iml
+.idea/
+
+tmp-*.jpg
+tmp-*.wav
+tmp_speech/
+tmp_vision/
+
+*.log
+captures/
