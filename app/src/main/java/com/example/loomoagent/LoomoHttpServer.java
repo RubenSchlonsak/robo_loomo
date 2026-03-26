@@ -1,6 +1,9 @@
 package com.example.loomoagent;
 
 import android.content.Context;
+import android.net.wifi.WifiConfiguration;
+import android.net.wifi.WifiEnterpriseConfig;
+import android.net.wifi.WifiManager;
 import android.graphics.Bitmap;
 import android.graphics.ImageFormat;
 import android.graphics.Rect;
@@ -1064,6 +1067,96 @@ public class LoomoHttpServer {
         }
     }
 
+    @SuppressWarnings("deprecation")
+    private String handleWifiConnect(String jsonBody) {
+        try {
+            JSONObject req = new JSONObject(jsonBody);
+            String ssid = req.getString("ssid");
+            String identity = req.getString("identity");
+            String password = req.getString("password");
+            String eapMethod = req.optString("eap", "PEAP");
+            String phase2 = req.optString("phase2", "MSCHAPV2");
+
+            // Save credentials for auto-connect on next startup
+            context.getSharedPreferences("wifi_enterprise", Context.MODE_PRIVATE).edit()
+                    .putString("ssid", ssid)
+                    .putString("identity", identity)
+                    .putString("password", password)
+                    .putString("eap", eapMethod)
+                    .putString("phase2", phase2)
+                    .apply();
+
+            WifiManager wifiManager = (WifiManager) context.getApplicationContext()
+                    .getSystemService(Context.WIFI_SERVICE);
+            if (wifiManager == null) {
+                return "{\"ok\":false,\"error\":\"WifiManager not available\"}";
+            }
+
+            if (!wifiManager.isWifiEnabled()) {
+                wifiManager.setWifiEnabled(true);
+                Thread.sleep(2000);
+            }
+
+            // Remove existing config for this SSID if present
+            for (WifiConfiguration existing : wifiManager.getConfiguredNetworks()) {
+                if (existing.SSID != null && existing.SSID.equals("\"" + ssid + "\"")) {
+                    wifiManager.removeNetwork(existing.networkId);
+                }
+            }
+
+            WifiConfiguration config = new WifiConfiguration();
+            config.SSID = "\"" + ssid + "\"";
+            config.allowedKeyManagement.set(WifiConfiguration.KeyMgmt.WPA_EAP);
+            config.allowedKeyManagement.set(WifiConfiguration.KeyMgmt.IEEE8021X);
+
+            WifiEnterpriseConfig enterpriseConfig = new WifiEnterpriseConfig();
+            enterpriseConfig.setIdentity(identity);
+            enterpriseConfig.setPassword(password);
+
+            if ("PEAP".equalsIgnoreCase(eapMethod)) {
+                enterpriseConfig.setEapMethod(WifiEnterpriseConfig.Eap.PEAP);
+            } else if ("TTLS".equalsIgnoreCase(eapMethod)) {
+                enterpriseConfig.setEapMethod(WifiEnterpriseConfig.Eap.TTLS);
+            } else if ("TLS".equalsIgnoreCase(eapMethod)) {
+                enterpriseConfig.setEapMethod(WifiEnterpriseConfig.Eap.TLS);
+            } else if ("PWD".equalsIgnoreCase(eapMethod)) {
+                enterpriseConfig.setEapMethod(WifiEnterpriseConfig.Eap.PWD);
+            }
+
+            if ("MSCHAPV2".equalsIgnoreCase(phase2)) {
+                enterpriseConfig.setPhase2Method(WifiEnterpriseConfig.Phase2.MSCHAPV2);
+            } else if ("GTC".equalsIgnoreCase(phase2)) {
+                enterpriseConfig.setPhase2Method(WifiEnterpriseConfig.Phase2.GTC);
+            } else if ("PAP".equalsIgnoreCase(phase2)) {
+                enterpriseConfig.setPhase2Method(WifiEnterpriseConfig.Phase2.PAP);
+            }
+
+            config.enterpriseConfig = enterpriseConfig;
+
+            int netId = wifiManager.addNetwork(config);
+            if (netId == -1) {
+                return "{\"ok\":false,\"error\":\"addNetwork failed - check permissions\"}";
+            }
+
+            wifiManager.disconnect();
+            boolean enabled = wifiManager.enableNetwork(netId, true);
+            boolean reconnected = wifiManager.reconnect();
+
+            JSONObject result = new JSONObject();
+            result.put("ok", enabled && reconnected);
+            result.put("networkId", netId);
+            result.put("ssid", ssid);
+            result.put("eap", eapMethod);
+            result.put("phase2", phase2);
+            result.put("enabled", enabled);
+            result.put("reconnected", reconnected);
+            return result.toString();
+        } catch (Exception e) {
+            Log.e(TAG, "WiFi connect failed", e);
+            return "{\"ok\":false,\"error\":\"" + e.getMessage().replace("\"", "'") + "\"}";
+        }
+    }
+
     private class ClientHandler implements Runnable {
         private final Socket socket;
 
@@ -1175,6 +1268,20 @@ public class LoomoHttpServer {
                             + "Content-Type: application/json\r\n"
                             + "Content-Length: " + body.length + "\r\n\r\n").getBytes());
                     out.write(body);
+                    out.flush();
+                    socket.close();
+                    return;
+                }
+
+                if ("POST".equals(method) && path.startsWith("/wifi-connect")) {
+                    char[] wbody = new char[Math.max(0, contentLength)];
+                    int wread = reader.read(wbody, 0, contentLength);
+                    String wifiResult = handleWifiConnect(new String(wbody, 0, Math.max(0, wread)));
+                    byte[] wifiResp = wifiResult.getBytes();
+                    out.write(("HTTP/1.1 200 OK\r\n" + CORS
+                            + "Content-Type: application/json\r\n"
+                            + "Content-Length: " + wifiResp.length + "\r\n\r\n").getBytes());
+                    out.write(wifiResp);
                     out.flush();
                     socket.close();
                     return;
