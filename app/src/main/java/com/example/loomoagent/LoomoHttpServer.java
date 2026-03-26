@@ -118,6 +118,8 @@ public class LoomoHttpServer {
     private volatile float targetAngular = 0f;
     private volatile boolean driving = false;
 
+    private TunnelManager tunnelManager;
+
     private ServerSocket serverSocket;
     private final ExecutorService executor = Executors.newCachedThreadPool();
     private final ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor();
@@ -134,6 +136,7 @@ public class LoomoHttpServer {
         this.previewHolder = previewSurfaceView.getHolder();
         initPreviewSurface();
         initSDKs();
+        tunnelManager = new TunnelManager(context);
     }
 
     private void initPreviewSurface() {
@@ -875,11 +878,15 @@ public class LoomoHttpServer {
         });
 
         scheduleCameraRecoveryWatchdog();
+
+        // Start reverse tunnel if enabled
+        tunnelManager.startIfEnabled();
     }
 
     public void stop() {
         running = false;
         driving = false;
+        if (tunnelManager != null) tunnelManager.stop();
         stopAudioInput();
         stopPreview();
         stopLegacyCamera();
@@ -948,6 +955,13 @@ public class LoomoHttpServer {
             status.put("lastAudioSource", lastAudioSource);
             status.put("lastAudioPeak", lastAudioPeak);
             status.put("lastAudioRms", lastAudioRms);
+            if (tunnelManager != null) {
+                status.put("tunnel", tunnelManager.getStatus());
+                status.put("tunnelEnabled", tunnelManager.isEnabled());
+                status.put("tunnelServer", tunnelManager.getServerHost());
+                status.put("tunnelRemotePort", tunnelManager.getRemotePort());
+                status.put("tunnelError", tunnelManager.getLastError());
+            }
         } catch (Exception ignored) {
         }
         return status;
@@ -1157,6 +1171,38 @@ public class LoomoHttpServer {
         }
     }
 
+    private String handleTunnelConfig(String jsonBody) {
+        try {
+            JSONObject req = new JSONObject(jsonBody);
+            String action = req.optString("action", "start");
+
+            if ("stop".equals(action)) {
+                tunnelManager.stop();
+                return "{\"ok\":true,\"status\":\"stopped\"}";
+            }
+
+            // Configure and start
+            String host = req.optString("serverHost", tunnelManager.getServerHost());
+            int rPort = req.optInt("remotePort", tunnelManager.getRemotePort());
+            int lPort = req.optInt("localPort", tunnelManager.getLocalPort());
+
+            tunnelManager.stop();
+            tunnelManager.saveConfig(host, rPort, lPort, true);
+            tunnelManager.start();
+
+            JSONObject result = new JSONObject();
+            result.put("ok", true);
+            result.put("serverHost", host);
+            result.put("remotePort", rPort);
+            result.put("localPort", lPort);
+            result.put("status", tunnelManager.getStatus());
+            return result.toString();
+        } catch (Exception e) {
+            Log.e(TAG, "Tunnel config failed", e);
+            return "{\"ok\":false,\"error\":\"" + e.getMessage().replace("\"", "'") + "\"}";
+        }
+    }
+
     private class ClientHandler implements Runnable {
         private final Socket socket;
 
@@ -1282,6 +1328,40 @@ public class LoomoHttpServer {
                             + "Content-Type: application/json\r\n"
                             + "Content-Length: " + wifiResp.length + "\r\n\r\n").getBytes());
                     out.write(wifiResp);
+                    out.flush();
+                    socket.close();
+                    return;
+                }
+
+                if ("POST".equals(method) && path.startsWith("/tunnel")) {
+                    char[] tbody = new char[Math.max(0, contentLength)];
+                    int tread = reader.read(tbody, 0, contentLength);
+                    String tunnelResult = handleTunnelConfig(new String(tbody, 0, Math.max(0, tread)));
+                    byte[] tunnelResp = tunnelResult.getBytes();
+                    out.write(("HTTP/1.1 200 OK\r\n" + CORS
+                            + "Content-Type: application/json\r\n"
+                            + "Content-Length: " + tunnelResp.length + "\r\n\r\n").getBytes());
+                    out.write(tunnelResp);
+                    out.flush();
+                    socket.close();
+                    return;
+                }
+
+                if ("GET".equals(method) && path.startsWith("/tunnel")) {
+                    JSONObject tj = new JSONObject();
+                    try {
+                        tj.put("status", tunnelManager.getStatus());
+                        tj.put("enabled", tunnelManager.isEnabled());
+                        tj.put("serverHost", tunnelManager.getServerHost());
+                        tj.put("remotePort", tunnelManager.getRemotePort());
+                        tj.put("localPort", tunnelManager.getLocalPort());
+                        tj.put("lastError", tunnelManager.getLastError());
+                    } catch (Exception ignored) {}
+                    byte[] tunnelBody = tj.toString().getBytes();
+                    out.write(("HTTP/1.1 200 OK\r\n" + CORS
+                            + "Content-Type: application/json\r\n"
+                            + "Content-Length: " + tunnelBody.length + "\r\n\r\n").getBytes());
+                    out.write(tunnelBody);
                     out.flush();
                     socket.close();
                     return;

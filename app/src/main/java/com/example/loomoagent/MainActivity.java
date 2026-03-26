@@ -176,7 +176,9 @@ public class MainActivity extends AppCompatActivity {
                     " head=" + head +
                     " recognizer=" + recognizer + "\n" +
                     "audioSource=" + audioSource +
-                    " peak=" + audioPeak
+                    " peak=" + audioPeak + "\n" +
+                    "tunnel=" + status.optString("tunnel", "off") +
+                    " " + status.optString("tunnelServer", "")
             );
         } catch (Exception e) {
             statusText.setText("LoomoAgent running");
