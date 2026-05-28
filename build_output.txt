@@ -1,4 +1,3 @@
-Starting a Gradle Daemon, 2 incompatible and 2 stopped Daemons could not be reused, use --status for details
 Warning: Mapping new ns http://schemas.android.com/repository/android/common/02 to old ns http://schemas.android.com/repository/android/common/01
 Warning: Mapping new ns http://schemas.android.com/repository/android/generic/02 to old ns http://schemas.android.com/repository/android/generic/01
 Warning: Mapping new ns http://schemas.android.com/sdk/android/repo/addon2/02 to old ns http://schemas.android.com/sdk/android/repo/addon2/01
@@ -15,11 +14,14 @@ Warning: unerwartetes Element (URI:"", lokal:"base-extension"). Erwartete Elemen
 > Task :app:mainApkListPersistenceDebug UP-TO-DATE
 > Task :app:generateDebugResValues UP-TO-DATE
 > Task :app:createDebugCompatibleScreenManifests UP-TO-DATE
-> Task :app:compileDebugAidl NO-SOURCE
+> Task :app:extractDeepLinksDebug UP-TO-DATE
+> Task :app:mergeDebugShaders UP-TO-DATE
+> Task :app:compileDebugShaders UP-TO-DATE
+> Task :app:generateDebugAssets UP-TO-DATE
 > Task :app:compileDebugRenderscript NO-SOURCE
+> Task :app:compileDebugAidl NO-SOURCE
 > Task :app:generateDebugResources UP-TO-DATE
 > Task :app:mergeDebugResources UP-TO-DATE
-> Task :app:extractDeepLinksDebug UP-TO-DATE
 > Task :app:processDebugManifest UP-TO-DATE
 > Task :app:processDebugResources UP-TO-DATE
 
@@ -28,9 +30,6 @@ Note: Some input files use or override a deprecated API.
 Note: Recompile with -Xlint:deprecation for details.
 
 > Task :app:compileDebugSources
-> Task :app:mergeDebugShaders UP-TO-DATE
-> Task :app:compileDebugShaders UP-TO-DATE
-> Task :app:generateDebugAssets UP-TO-DATE
 > Task :app:mergeDebugAssets UP-TO-DATE
 > Task :app:processDebugJavaRes NO-SOURCE
 > Task :app:mergeDebugJavaResource UP-TO-DATE
@@ -47,6 +46,6 @@ Note: Recompile with -Xlint:deprecation for details.
 > Task :app:packageDebug
 > Task :app:assembleDebug
 
-BUILD SUCCESSFUL in 8s
+BUILD SUCCESSFUL in 1s
 25 actionable tasks: 4 executed, 21 up-to-date
 GRADLE_EXIT=0

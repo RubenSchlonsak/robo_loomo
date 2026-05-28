@@ -29,7 +29,7 @@ public class TunnelManager {
     private final Context context;
     private Process chiselProcess;
     private Thread monitorThread;
-    private volatile boolean enabled = false;
+    private volatile boolean enabled = true;
     private volatile String tunnelStatus = "stopped";
     private volatile String lastError = "";
 
@@ -50,7 +50,7 @@ public class TunnelManager {
         remotePort = prefs.getInt("remotePort", remotePort);
         localPort = prefs.getInt("localPort", localPort);
         auth = prefs.getString("auth", auth);
-        enabled = prefs.getBoolean("enabled", false);
+        enabled = prefs.getBoolean("enabled", true);
     }
 
     public void saveConfig(String serverHost, int remotePort, int localPort, boolean enabled) {
@@ -173,6 +173,8 @@ public class TunnelManager {
     /**
      * Resolve hostname to IP using Android's DNS (Java InetAddress),
      * bypassing chisel's own DNS which fails on some Android devices.
+     * Returns null if resolution fails, so the caller can retry instead of
+     * launching chisel with a hostname it can never resolve itself.
      */
     private String resolveServerHost() {
         String host = serverHost;
@@ -192,18 +194,17 @@ public class TunnelManager {
         String hostOnly = host.contains(":") ? host.substring(0, host.indexOf(":")) : host;
         String portPart = host.contains(":") ? ":" + host.substring(host.indexOf(":") + 1) : "";
 
-        // Try to resolve DNS via Java
+        // Try to resolve DNS via Java. A literal IP resolves to itself, so this
+        // also handles the case where serverHost already contains an IP.
         try {
             InetAddress addr = InetAddress.getByName(hostOnly);
             String ip = addr.getHostAddress();
-            if (!ip.equals(hostOnly)) {
-                Log.i(TAG, "Resolved " + hostOnly + " -> " + ip);
-                return scheme + ip + portPart;
-            }
+            Log.i(TAG, "Resolved " + hostOnly + " -> " + ip);
+            return scheme + ip + portPart;
         } catch (Exception e) {
-            Log.w(TAG, "DNS resolution failed for " + hostOnly + ", using as-is: " + e.getMessage());
+            Log.w(TAG, "DNS resolution failed for " + hostOnly + ": " + e.getMessage());
+            return null;
         }
-        return scheme + host;
     }
 
     /**
@@ -226,6 +227,15 @@ public class TunnelManager {
         try {
             String tunnelSpec = "R:" + remotePort + ":localhost:" + localPort;
             String resolvedHost = resolveServerHost();
+            if (resolvedHost == null) {
+                // DNS not available right now (e.g. WiFi still settling). Bail out
+                // so the monitor loop retries in RESTART_DELAY_MS and re-resolves,
+                // instead of handing chisel a hostname its own resolver can't look up.
+                lastError = "DNS resolution failed for " + serverHost;
+                tunnelStatus = "error";
+                Log.w(TAG, lastError + " - retrying after backoff");
+                return;
+            }
             String hostHeader = hostnameOnly(serverHost);
 
             List<String> cmdList = new ArrayList<>();

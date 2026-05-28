@@ -62,6 +62,7 @@ public class LoomoHttpServer {
     private static final int STREAM_FRAME_DELAY_MS = 150;
     private static final int CAMERA_FRAME_STALE_MS = 4000;
     private static final int CAMERA_RECOVERY_INTERVAL_MS = 5000;
+    private static final long SDK_REBIND_INTERVAL_MS = 8000L;
     private static final float TTS_VOLUME = 1.0f;
     private static final boolean ENABLE_ON_DEVICE_PREVIEW = false;
     private static final int DEFAULT_AUDIO_CAPTURE_MS = 2000;
@@ -129,12 +130,15 @@ public class LoomoHttpServer {
     private volatile boolean cameraRecoveryRunning = false;
     private volatile long lastCameraRecoveryAt = 0L;
     private volatile int cameraRecoveryAttempts = 0;
+    private volatile long lastSdkBindAttemptAt = 0L;
 
     public LoomoHttpServer(Context context, SurfaceView previewSurfaceView) {
         this.context = context;
         this.previewSurfaceView = previewSurfaceView;
-        this.previewHolder = previewSurfaceView.getHolder();
-        initPreviewSurface();
+        this.previewHolder = previewSurfaceView != null ? previewSurfaceView.getHolder() : null;
+        if (previewSurfaceView != null) {
+            initPreviewSurface();
+        }
         initSDKs();
         tunnelManager = new TunnelManager(context);
     }
@@ -167,24 +171,7 @@ public class LoomoHttpServer {
 
     private void initSDKs() {
         vision = Vision.getInstance();
-        vision.bindService(context, new ServiceBinder.BindStateListener() {
-            @Override
-            public void onBind() {
-                visionBound = true;
-                refreshColorStreamInfo();
-                Log.i(TAG, "Vision bound");
-                startPreviewIfReady();
-                startFrameListenerIfReady();
-            }
-
-            @Override
-            public void onUnbind(String reason) {
-                visionBound = false;
-                previewStarted = false;
-                frameListenerActive = false;
-                Log.w(TAG, "Vision unbound: " + reason);
-            }
-        });
+        bindVision();
 
         base = Base.getInstance();
         base.bindService(context, new ServiceBinder.BindStateListener() {
@@ -222,21 +209,7 @@ public class LoomoHttpServer {
         });
 
         recognizer = Recognizer.getInstance();
-        recognizer.bindService(context, new ServiceBinder.BindStateListener() {
-            @Override
-            public void onBind() {
-                recognizerBound = true;
-                Log.i(TAG, "Recognizer bound");
-                startAudioInput();
-            }
-
-            @Override
-            public void onUnbind(String reason) {
-                recognizerBound = false;
-                listeningActive = false;
-                Log.w(TAG, "Recognizer unbound: " + reason);
-            }
-        });
+        bindRecognizer();
 
         tts = new TextToSpeech(context, new TextToSpeech.OnInitListener() {
             @Override
@@ -255,6 +228,53 @@ public class LoomoHttpServer {
         });
 
         audioManager = (AudioManager) context.getSystemService(Context.AUDIO_SERVICE);
+    }
+
+    private void bindVision() {
+        try {
+            vision.bindService(context, new ServiceBinder.BindStateListener() {
+                @Override
+                public void onBind() {
+                    visionBound = true;
+                    refreshColorStreamInfo();
+                    Log.i(TAG, "Vision bound");
+                    startPreviewIfReady();
+                    startFrameListenerIfReady();
+                }
+
+                @Override
+                public void onUnbind(String reason) {
+                    visionBound = false;
+                    previewStarted = false;
+                    frameListenerActive = false;
+                    Log.w(TAG, "Vision unbound: " + reason);
+                }
+            });
+        } catch (Throwable e) {
+            Log.w(TAG, "bindVision failed: " + e.getMessage());
+        }
+    }
+
+    private void bindRecognizer() {
+        try {
+            recognizer.bindService(context, new ServiceBinder.BindStateListener() {
+                @Override
+                public void onBind() {
+                    recognizerBound = true;
+                    Log.i(TAG, "Recognizer bound");
+                    startAudioInput();
+                }
+
+                @Override
+                public void onUnbind(String reason) {
+                    recognizerBound = false;
+                    listeningActive = false;
+                    Log.w(TAG, "Recognizer unbound: " + reason);
+                }
+            });
+        } catch (Throwable e) {
+            Log.w(TAG, "bindRecognizer failed: " + e.getMessage());
+        }
     }
 
     private void ensureTtsVolume() {
@@ -301,7 +321,7 @@ public class LoomoHttpServer {
     }
 
     private synchronized void startPreviewIfReady() {
-        if (!ENABLE_ON_DEVICE_PREVIEW) return;
+        if (!ENABLE_ON_DEVICE_PREVIEW || previewHolder == null) return;
         if (!visionBound || !surfaceReady || previewStarted) return;
         if (previewHolder.getSurface() == null || !previewHolder.getSurface().isValid()) return;
         try {
@@ -526,7 +546,29 @@ public class LoomoHttpServer {
         cameraRecoveryTask = scheduler.scheduleWithFixedDelay(new Runnable() {
             @Override
             public void run() {
-                if (!running || !visionBound) {
+                if (!running) {
+                    return;
+                }
+
+                // Self-heal SDK bindings: if Vision/Recognizer failed to bind at
+                // startup (e.g. a stale binding from a previous process), keep
+                // retrying so the camera/audio recover without an app restart.
+                if (!visionBound || !recognizerBound) {
+                    long bindNow = System.currentTimeMillis();
+                    if (bindNow - lastSdkBindAttemptAt > SDK_REBIND_INTERVAL_MS) {
+                        lastSdkBindAttemptAt = bindNow;
+                        if (!visionBound) {
+                            Log.w(TAG, "Vision not bound - attempting rebind");
+                            bindVision();
+                        }
+                        if (!recognizerBound) {
+                            Log.w(TAG, "Recognizer not bound - attempting rebind");
+                            bindRecognizer();
+                        }
+                    }
+                }
+
+                if (!visionBound) {
                     return;
                 }
 

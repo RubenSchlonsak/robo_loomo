@@ -2,11 +2,13 @@ package com.example.loomoagent;
 
 import android.Manifest;
 import android.content.Context;
+import android.content.Intent;
 import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
 import android.net.wifi.WifiConfiguration;
 import android.net.wifi.WifiEnterpriseConfig;
 import android.net.wifi.WifiManager;
+import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
@@ -29,7 +31,6 @@ public class MainActivity extends AppCompatActivity {
             Manifest.permission.RECORD_AUDIO
     };
 
-    private LoomoHttpServer httpServer;
     private final Handler uiHandler = new Handler(Looper.getMainLooper());
     private final Runnable uiRefresh = new Runnable() {
         @Override
@@ -74,7 +75,7 @@ public class MainActivity extends AppCompatActivity {
     protected void onDestroy() {
         super.onDestroy();
         uiHandler.removeCallbacks(uiRefresh);
-        if (httpServer != null) httpServer.stop();
+        // Server lives in LoomoService; do not stop it when the activity closes.
     }
 
     @Override
@@ -118,9 +119,12 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void startServer() {
-        if (httpServer != null) return;
-        httpServer = new LoomoHttpServer(this, previewSurface);
-        httpServer.start();
+        Intent svc = new Intent(this, LoomoService.class);
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            startForegroundService(svc);
+        } else {
+            startService(svc);
+        }
         updateScreenInfo();
     }
 
@@ -139,7 +143,8 @@ public class MainActivity extends AppCompatActivity {
         String baseUrl = "http://" + ip + ":" + LoomoHttpServer.PORT;
         ipText.setText(baseUrl);
 
-        if (httpServer == null) {
+        LoomoHttpServer server = LoomoService.getServer();
+        if (server == null) {
             detailsText.setText(
                     "GET " + baseUrl + "/\n" +
                     "GET " + baseUrl + "/snapshot\n" +
@@ -151,7 +156,7 @@ public class MainActivity extends AppCompatActivity {
         }
 
         try {
-            org.json.JSONObject status = httpServer.getStatusSnapshot();
+            org.json.JSONObject status = server.getStatusSnapshot();
             boolean vision = status.optBoolean("vision");
             boolean preview = status.optBoolean("preview");
             boolean base = status.optBoolean("base");
