@@ -34,9 +34,10 @@ public class TunnelManager {
     private volatile String lastError = "";
 
     // Default config
-    private String serverHost = "tunnel.cphs.mylab.th-luebeck.de";
+    private String serverHost = "https://loomo-tunnel.cphs.mylab.th-luebeck.de";
     private int remotePort = 8280;
     private int localPort = LoomoHttpServer.PORT; // 8080
+    private String auth = "loomo:loomotunnel2026";
 
     public TunnelManager(Context context) {
         this.context = context;
@@ -48,6 +49,7 @@ public class TunnelManager {
         serverHost = prefs.getString("serverHost", serverHost);
         remotePort = prefs.getInt("remotePort", remotePort);
         localPort = prefs.getInt("localPort", localPort);
+        auth = prefs.getString("auth", auth);
         enabled = prefs.getBoolean("enabled", false);
     }
 
@@ -204,17 +206,46 @@ public class TunnelManager {
         return scheme + host;
     }
 
+    /**
+     * Extract the bare hostname (no scheme, port or path) from the configured serverHost.
+     * Used as the HTTP Host header so the k8s ingress routes correctly even though we
+     * dial the resolved IP (chisel's Go resolver cannot do DNS on Android).
+     */
+    private String hostnameOnly(String host) {
+        if (host == null) return "";
+        if (host.startsWith("https://")) host = host.substring(8);
+        else if (host.startsWith("http://")) host = host.substring(7);
+        int slash = host.indexOf('/');
+        if (slash >= 0) host = host.substring(0, slash);
+        int colon = host.indexOf(':');
+        if (colon >= 0) host = host.substring(0, colon);
+        return host;
+    }
+
     private void runChisel(File binary) {
         try {
             String tunnelSpec = "R:" + remotePort + ":localhost:" + localPort;
             String resolvedHost = resolveServerHost();
+            String hostHeader = hostnameOnly(serverHost);
 
             List<String> cmdList = new ArrayList<>();
             cmdList.add(binary.getAbsolutePath());
             cmdList.add("client");
-            // Skip TLS verification for HTTPS (self-signed or renegotiation issues)
+            cmdList.add("--keepalive");
+            cmdList.add("5s");
+            if (auth != null && !auth.isEmpty()) {
+                cmdList.add("--auth");
+                cmdList.add(auth);
+            }
+            // Skip TLS verification: we connect to the resolved IP, so the cert
+            // (issued for the hostname) will not match the SNI.
             if (resolvedHost.startsWith("https://")) {
                 cmdList.add("--tls-skip-verify");
+            }
+            // Force the real hostname as Host header so the ingress matches its rule.
+            if (hostHeader != null && !hostHeader.isEmpty()) {
+                cmdList.add("--hostname");
+                cmdList.add(hostHeader);
             }
             cmdList.add(resolvedHost);
             cmdList.add(tunnelSpec);

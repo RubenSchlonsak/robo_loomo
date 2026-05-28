@@ -1,5 +1,5 @@
 @echo off
-set JAVA_HOME=C:\Program Files\Android\Android Studio\jbr
+set JAVA_HOME=C:\Users\rs280\.jdks\ms-11.0.30
 set PATH=%JAVA_HOME%\bin;%PATH%
 cd /d C:\Users\rs280\LoomoAgent
 call gradlew.bat assembleDebug > C:\Users\rs280\LoomoAgent\build_output.txt 2>&1
